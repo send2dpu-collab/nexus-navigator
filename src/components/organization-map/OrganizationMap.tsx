@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Sidebar } from './Sidebar';
 import { ViewToggle } from './ViewToggle';
 import { SearchBar } from './SearchBar';
 import { StatusLegend } from './StatusLegend';
@@ -18,7 +17,7 @@ import {
 export const OrganizationMap = () => {
   const [activeView, setActiveView] = useState<ViewType>('application');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [selectedApp, setSelectedApp] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<string | null>(null);
 
   const layers = useMemo(() => getLayerData(), []);
@@ -27,6 +26,14 @@ export const OrganizationMap = () => {
   const entityCount = activeView === 'application' 
     ? applicationNodes.length 
     : networkDevices.length;
+
+  const filteredApps = useMemo(() => {
+    const apps = applicationNodes.filter(n => n.layer === 'applications');
+    if (!searchQuery) return apps;
+    return apps.filter(app => 
+      app.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [searchQuery]);
 
   const filteredLayers = useMemo(() => {
     if (!searchQuery) return layers;
@@ -50,9 +57,7 @@ export const OrganizationMap = () => {
   }, [searchQuery]);
 
   return (
-    <div className="flex h-screen w-full bg-background">
-      <Sidebar />
-      
+    <div className="flex flex-col h-screen w-full bg-background">
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border bg-background/95 backdrop-blur">
@@ -65,7 +70,7 @@ export const OrganizationMap = () => {
             </div>
             <ViewToggle activeView={activeView} onViewChange={(view) => {
               setActiveView(view);
-              setSelectedNode(null);
+              setSelectedApp(null);
               setSelectedDevice(null);
             }} />
           </div>
@@ -83,7 +88,7 @@ export const OrganizationMap = () => {
         {/* Content */}
         <div className="flex-1 overflow-hidden">
           <motion.div
-            key={activeView}
+            key={`${activeView}-${selectedApp}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -92,9 +97,11 @@ export const OrganizationMap = () => {
           >
             {activeView === 'application' ? (
               <ApplicationView 
+                apps={filteredApps}
                 layers={filteredLayers}
-                selectedNode={selectedNode}
-                onNodeSelect={setSelectedNode}
+                allNodes={applicationNodes}
+                selectedApp={selectedApp}
+                onAppSelect={setSelectedApp}
               />
             ) : (
               <NetworkView 
