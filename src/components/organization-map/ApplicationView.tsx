@@ -18,9 +18,12 @@ import {
   X,
   ZoomIn,
   ZoomOut,
-  Maximize2
+  Maximize2,
+  ArrowLeft
 } from 'lucide-react';
 import { LayerData, AppViewNode, StatusType, LayerType } from '@/types/organization-map';
+import { ApplicationOverview } from './ApplicationOverview';
+import { FilterState } from './FilterDialog';
 
 interface ApplicationViewProps {
   apps: AppViewNode[];
@@ -28,6 +31,8 @@ interface ApplicationViewProps {
   allNodes: AppViewNode[];
   selectedApp: string | null;
   onAppSelect: (appId: string | null) => void;
+  searchQuery: string;
+  filters: FilterState;
 }
 
 const layerIcons: Record<LayerType, typeof Globe> = {
@@ -51,20 +56,6 @@ const statusColors: Record<StatusType, string> = {
   warning: 'hsl(48 96% 53%)',
   critical: 'hsl(0 84% 60%)',
   unknown: 'hsl(220 9% 46%)',
-};
-
-const statusBgColors: Record<StatusType, string> = {
-  healthy: 'bg-status-healthy/20',
-  warning: 'bg-status-warning/20',
-  critical: 'bg-status-critical/20',
-  unknown: 'bg-status-unknown/20',
-};
-
-const statusBorderColors: Record<StatusType, string> = {
-  healthy: 'border-status-healthy',
-  warning: 'border-status-warning',
-  critical: 'border-status-critical',
-  unknown: 'border-status-unknown',
 };
 
 interface NodePosition {
@@ -129,19 +120,79 @@ const generateNodeMetrics = (node: AppViewNode) => {
   }
 };
 
-export const ApplicationView = ({ apps, layers, allNodes, selectedApp, onAppSelect }: ApplicationViewProps) => {
+export const ApplicationView = ({ apps, layers, allNodes, selectedApp, onAppSelect, searchQuery, filters }: ApplicationViewProps) => {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
+  if (!selectedApp) {
+    return (
+      <ApplicationOverview
+        applications={apps}
+        onApplicationSelect={onAppSelect}
+        searchQuery={searchQuery}
+      />
+    );
+  }
+
+  const selectedAppNode = allNodes.find(n => n.id === selectedApp);
+  if (!selectedAppNode) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-muted-foreground">Application not found</p>
+      </div>
+    );
+  }
+
+  const getDescendants = (nodeId: string): Set<string> => {
+    const descendants = new Set<string>([nodeId]);
+    const node = allNodes.find(n => n.id === nodeId);
+
+    if (node?.children) {
+      node.children.forEach(childId => {
+        const childDescendants = getDescendants(childId);
+        childDescendants.forEach(id => descendants.add(id));
+      });
+    }
+
+    return descendants;
+  };
+
+  const relevantNodeIds = getDescendants(selectedApp);
+  const filteredNodes = allNodes.filter(node => {
+    if (!relevantNodeIds.has(node.id)) return false;
+    if (!filters.statuses.includes(node.status)) return false;
+    if (filters.layers && !filters.layers.includes(node.layer)) return false;
+    return true;
+  });
+
+  const filteredLayers = layers
+    .map(layer => ({
+      ...layer,
+      nodes: layer.nodes.filter(node => filteredNodes.some(fn => fn.id === node.id)),
+      count: layer.nodes.filter(node => filteredNodes.some(fn => fn.id === node.id)).length,
+    }))
+    .filter(layer => layer.nodes.length > 0);
+
   return (
-    <LayeredTopologyView
-      layers={layers}
-      allNodes={allNodes}
-      selectedNode={selectedNode}
-      onNodeSelect={setSelectedNode}
-      hoveredNode={hoveredNode}
-      onNodeHover={setHoveredNode}
-    />
+    <div className="relative h-full">
+      <button
+        onClick={() => onAppSelect(null)}
+        className="absolute top-4 left-4 z-20 flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-lg hover:bg-secondary transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        <span className="text-sm font-medium">Back to Overview</span>
+      </button>
+
+      <LayeredTopologyView
+        layers={filteredLayers}
+        allNodes={filteredNodes}
+        selectedNode={selectedNode}
+        onNodeSelect={setSelectedNode}
+        hoveredNode={hoveredNode}
+        onNodeHover={setHoveredNode}
+        applicationName={selectedAppNode.name}
+      />
+    </div>
   );
 };
 
@@ -152,6 +203,7 @@ interface LayeredTopologyViewProps {
   onNodeSelect: (nodeId: string | null) => void;
   hoveredNode: string | null;
   onNodeHover: (nodeId: string | null) => void;
+  applicationName: string;
 }
 
 const LayeredTopologyView = ({
@@ -161,6 +213,7 @@ const LayeredTopologyView = ({
   onNodeSelect,
   hoveredNode,
   onNodeHover,
+  applicationName,
 }: LayeredTopologyViewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -170,11 +223,10 @@ const LayeredTopologyView = ({
   const dragStart = useRef({ x: 0, y: 0 });
   const lastPan = useRef({ x: 0, y: 0 });
 
-  // Calculate node positions
   useEffect(() => {
     const positions: Record<string, NodePosition> = {};
     const layerHeight = 150;
-    const startY = 60;
+    const startY = 80;
     const nodeSpacing = 120;
     const leftMargin = 200;
 
@@ -193,7 +245,6 @@ const LayeredTopologyView = ({
     setNodePositions(positions);
   }, [layers]);
 
-  // Center view on mount
   useEffect(() => {
     if (containerRef.current && Object.keys(nodePositions).length > 0) {
       const container = containerRef.current;
@@ -242,7 +293,9 @@ const LayeredTopologyView = ({
     allNodes.forEach(node => {
       if (node.children) {
         node.children.forEach(childId => {
-          connections.push({ from: node.id, to: childId });
+          if (allNodes.some(n => n.id === childId)) {
+            connections.push({ from: node.id, to: childId });
+          }
         });
       }
     });
@@ -256,7 +309,6 @@ const LayeredTopologyView = ({
     const targetNode = hoveredNode || selectedNode;
     if (nodeId === targetNode) return true;
 
-    // Check if connected
     return connections.some(c =>
       (c.from === targetNode && c.to === nodeId) ||
       (c.to === targetNode && c.from === nodeId)
@@ -271,7 +323,6 @@ const LayeredTopologyView = ({
 
   return (
     <div className="h-full flex">
-      {/* Main canvas area */}
       <div
         ref={containerRef}
         className={`relative flex-1 overflow-hidden bg-gradient-to-br from-background via-secondary/10 to-background transition-all duration-300`}
@@ -282,8 +333,12 @@ const LayeredTopologyView = ({
         onWheel={handleWheel}
         style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
-        {/* Layer Labels - Left Side */}
         <div className="absolute left-0 top-0 bottom-0 w-48 bg-sidebar/50 backdrop-blur border-r border-border z-10">
+          <div className="p-4 border-b border-border">
+            <p className="text-xs font-semibold text-muted-foreground mb-1">APPLICATION</p>
+            <p className="text-sm font-semibold text-foreground truncate">{applicationName}</p>
+          </div>
+
           {layers.map((layer, index) => {
             const Icon = layerIcons[layer.type];
             return (
@@ -307,7 +362,6 @@ const LayeredTopologyView = ({
           })}
         </div>
 
-        {/* Controls */}
         <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
           <button
             onClick={() => setZoom(z => Math.min(z * 1.2, 2))}
@@ -329,12 +383,10 @@ const LayeredTopologyView = ({
           </button>
         </div>
 
-        {/* Zoom indicator */}
         <div className="absolute bottom-4 right-4 z-20 px-3 py-1.5 bg-card/90 backdrop-blur border border-border rounded-lg">
           <span className="text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
         </div>
 
-        {/* Canvas */}
         <div
           className="absolute inset-0 ml-48"
           style={{
@@ -342,7 +394,6 @@ const LayeredTopologyView = ({
             transformOrigin: '0 0',
           }}
         >
-          {/* SVG for connections */}
           <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ overflow: 'visible' }}>
             <defs>
               <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
@@ -360,7 +411,6 @@ const LayeredTopologyView = ({
               </filter>
             </defs>
 
-            {/* Connection lines */}
             {connections.map((conn, index) => {
               const fromPos = nodePositions[conn.from];
               const toPos = nodePositions[conn.to];
@@ -374,7 +424,6 @@ const LayeredTopologyView = ({
               const isHighlighted = isConnectionHighlighted(conn);
               const isDimmed = (hoveredNode || selectedNode) && !isHighlighted;
 
-              // Curved path
               const midY = (y1 + y2) / 2;
               const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
 
@@ -394,7 +443,6 @@ const LayeredTopologyView = ({
             })}
           </svg>
 
-          {/* Nodes */}
           {allNodes.map((node, index) => {
             const position = nodePositions[node.id];
             if (!position) return null;
@@ -425,7 +473,6 @@ const LayeredTopologyView = ({
                 onMouseEnter={() => onNodeHover(node.id)}
                 onMouseLeave={() => onNodeHover(null)}
               >
-                {/* Node circle */}
                 <div
                   className={`relative flex items-center justify-center w-20 h-20 rounded-xl border-2 transition-all
                     ${isSelected || isHovered ? 'bg-card shadow-xl' : 'bg-card/80 hover:bg-card'}
@@ -438,14 +485,12 @@ const LayeredTopologyView = ({
                 >
                   <Icon className="w-8 h-8" style={{ color: layerColors[node.layer] }} />
 
-                  {/* Status indicator */}
                   <div
                     className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-card"
                     style={{ backgroundColor: statusColors[node.status] }}
                   />
                 </div>
 
-                {/* Node label */}
                 <div className="mt-2 text-center max-w-[100px]">
                   <p className="text-xs font-medium text-foreground truncate">{node.name}</p>
                   <p className="text-[10px] text-muted-foreground capitalize">{node.type}</p>
@@ -456,7 +501,6 @@ const LayeredTopologyView = ({
         </div>
       </div>
 
-      {/* Right Side Panel - Component Details */}
       <AnimatePresence>
         {selectedNode && (
           <ComponentDetailsPanel
@@ -470,7 +514,6 @@ const LayeredTopologyView = ({
   );
 };
 
-// Component Details Panel
 interface ComponentDetailsPanelProps {
   node: AppViewNode;
   allNodes: AppViewNode[];
@@ -497,7 +540,6 @@ const ComponentDetailsPanel = ({ node, allNodes, onClose }: ComponentDetailsPane
       transition={{ type: 'spring', damping: 25, stiffness: 200 }}
       className="w-80 h-full bg-card border-l border-border overflow-y-auto"
     >
-      {/* Header */}
       <div className="sticky top-0 z-10 flex items-center gap-3 p-4 bg-card border-b border-border">
         <div
           className="flex items-center justify-center w-12 h-12 rounded-xl"
@@ -523,7 +565,6 @@ const ComponentDetailsPanel = ({ node, allNodes, onClose }: ComponentDetailsPane
         </button>
       </div>
 
-      {/* Basic Info */}
       {(node.type === 'host' && node.os) || (node.type === 'host' && node.ip) || (node.type === 'datacenter' && node.location) ? (
         <div className="p-4 border-b border-border">
           <h4 className="text-xs font-semibold text-muted-foreground mb-3">BASIC INFO</h4>
@@ -536,7 +577,6 @@ const ComponentDetailsPanel = ({ node, allNodes, onClose }: ComponentDetailsPane
         </div>
       ) : null}
 
-      {/* Critical Metrics */}
       <div className="p-4 border-b border-border">
         <h4 className="text-xs font-semibold text-muted-foreground mb-3">CRITICAL METRICS</h4>
         <div className="grid grid-cols-2 gap-3">
@@ -704,7 +744,6 @@ const ComponentDetailsPanel = ({ node, allNodes, onClose }: ComponentDetailsPane
         </div>
       </div>
 
-      {/* Related Components */}
       {(parents.length > 0 || children.length > 0) && (
         <div className="p-4">
           {parents.length > 0 && (
@@ -782,7 +821,6 @@ const ComponentDetailsPanel = ({ node, allNodes, onClose }: ComponentDetailsPane
   );
 };
 
-// Helper components
 const InfoRow = ({ label, value, valueColor, icon }: { label: string; value: string; valueColor?: string; icon?: React.ReactNode }) => (
   <div className="flex justify-between items-center">
     <span className="text-xs text-muted-foreground">{label}</span>

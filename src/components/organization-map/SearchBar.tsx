@@ -1,13 +1,18 @@
-import { Search, Filter } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { FilterDialog, FilterState } from './FilterDialog';
+import { ViewType } from '@/types/organization-map';
 
 interface SearchBarProps {
   value: string;
   onChange: (value: string) => void;
   entityCount: number;
+  viewMode: ViewType;
+  filters: FilterState;
+  onFiltersChange: (filters: FilterState) => void;
 }
 
-export const SearchBar = ({ value, onChange, entityCount }: SearchBarProps) => {
+export const SearchBar = ({ value, onChange, entityCount, viewMode, filters, onFiltersChange }: SearchBarProps) => {
   return (
     <div className="flex items-center gap-3">
       <div className="relative">
@@ -20,12 +25,14 @@ export const SearchBar = ({ value, onChange, entityCount }: SearchBarProps) => {
           className="w-64 pl-10 bg-secondary/50 border-border focus:border-primary"
         />
       </div>
-      
-      <button className="flex items-center gap-2 px-3 py-2 rounded-md bg-secondary/50 border border-border text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-        <Filter className="h-4 w-4" />
-        <span className="text-sm">Filters</span>
-      </button>
-      
+
+      <FilterDialog
+        currentFilters={filters}
+        onFiltersChange={onFiltersChange}
+        mode={viewMode}
+        entityCount={entityCount}
+      />
+
       <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-secondary/30 border border-border/50">
         <span className="text-xs text-muted-foreground">Entities:</span>
         <span className="text-sm font-semibold text-foreground">{entityCount}</span>
