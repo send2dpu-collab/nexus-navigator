@@ -12,7 +12,11 @@ import {
   Cloud,
   Activity,
   Clock,
-  Network
+  Network,
+  X,
+  Cpu,
+  Thermometer,
+  AlertTriangle
 } from 'lucide-react';
 import { NetworkDevice, Connection, StatusType, DeviceType } from '@/types/organization-map';
 
@@ -57,6 +61,64 @@ const deviceColors: Record<DeviceType, string> = {
   endpoint: 'hsl(220 9% 46%)',
 };
 
+// Generate mock device metrics
+const getDeviceMetrics = (device: NetworkDevice) => {
+  const base = {
+    uptime: `${Math.floor(Math.random() * 365) + 30} days`,
+    lastSeen: '< 1 min ago',
+  };
+
+  switch (device.deviceType) {
+    case 'router':
+      return {
+        ...base,
+        cpu: `${Math.floor(Math.random() * 40 + 20)}%`,
+        memory: `${Math.floor(Math.random() * 50 + 30)}%`,
+        temperature: `${Math.floor(Math.random() * 20 + 35)}°C`,
+        packets: `${Math.floor(Math.random() * 100 + 50)}K/s`,
+        errors: Math.floor(Math.random() * 10),
+        interfaces: Math.floor(Math.random() * 20 + 10),
+      };
+    case 'switch':
+      return {
+        ...base,
+        cpu: `${Math.floor(Math.random() * 30 + 10)}%`,
+        memory: `${Math.floor(Math.random() * 40 + 20)}%`,
+        ports: `${Math.floor(Math.random() * 24 + 8)}/48`,
+        vlanCount: Math.floor(Math.random() * 20 + 5),
+        macTableSize: Math.floor(Math.random() * 2000 + 500),
+      };
+    case 'firewall':
+      return {
+        ...base,
+        cpu: `${Math.floor(Math.random() * 50 + 30)}%`,
+        memory: `${Math.floor(Math.random() * 60 + 30)}%`,
+        activeSessions: `${Math.floor(Math.random() * 50 + 10)}K`,
+        throughput: `${Math.floor(Math.random() * 5 + 1)} Gbps`,
+        blockedThreats: Math.floor(Math.random() * 500 + 100),
+      };
+    case 'server':
+      return {
+        ...base,
+        cpu: `${Math.floor(Math.random() * 60 + 20)}%`,
+        memory: `${Math.floor(Math.random() * 70 + 20)}%`,
+        disk: `${Math.floor(Math.random() * 60 + 20)}%`,
+        processes: Math.floor(Math.random() * 200 + 50),
+        networkIO: `${Math.floor(Math.random() * 500 + 100)} MB/s`,
+      };
+    case 'wifi':
+      return {
+        ...base,
+        clients: Math.floor(Math.random() * 50 + 10),
+        channel: Math.floor(Math.random() * 11 + 1),
+        signalStrength: `-${Math.floor(Math.random() * 30 + 40)} dBm`,
+        throughput: `${Math.floor(Math.random() * 500 + 100)} Mbps`,
+      };
+    default:
+      return base;
+  }
+};
+
 export const NetworkView = ({ devices, connections, selectedDevice, onDeviceSelect }: NetworkViewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -86,18 +148,20 @@ export const NetworkView = ({ devices, connections, selectedDevice, onDeviceSele
       const contentHeight = maxY - minY + 200;
       
       // Calculate zoom to fit
-      const zoomX = (containerWidth - 100) / contentWidth;
+      const panelWidth = selectedDevice ? 320 : 0;
+      const availableWidth = containerWidth - panelWidth - 100;
+      const zoomX = availableWidth / contentWidth;
       const zoomY = (containerHeight - 100) / contentHeight;
       const fitZoom = Math.min(zoomX, zoomY, 1.2);
       
       // Center content
-      const centerX = (containerWidth - contentWidth * fitZoom) / 2 - minX * fitZoom + 40;
+      const centerX = (availableWidth - contentWidth * fitZoom) / 2 - minX * fitZoom + 40;
       const centerY = (containerHeight - contentHeight * fitZoom) / 2 - minY * fitZoom + 60;
       
       setZoom(fitZoom);
       setPan({ x: centerX, y: centerY });
     }
-  }, [devices]);
+  }, [devices, selectedDevice]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -143,11 +207,13 @@ export const NetworkView = ({ devices, connections, selectedDevice, onDeviceSele
       const contentWidth = maxX - minX + 150;
       const contentHeight = maxY - minY + 200;
       
-      const zoomX = (containerWidth - 100) / contentWidth;
+      const panelWidth = selectedDevice ? 320 : 0;
+      const availableWidth = containerWidth - panelWidth - 100;
+      const zoomX = availableWidth / contentWidth;
       const zoomY = (containerHeight - 100) / contentHeight;
       const fitZoom = Math.min(zoomX, zoomY, 1.2);
       
-      const centerX = (containerWidth - contentWidth * fitZoom) / 2 - minX * fitZoom + 40;
+      const centerX = (availableWidth - contentWidth * fitZoom) / 2 - minX * fitZoom + 40;
       const centerY = (containerHeight - contentHeight * fitZoom) / 2 - minY * fitZoom + 60;
       
       setZoom(fitZoom);
@@ -176,279 +242,281 @@ export const NetworkView = ({ devices, connections, selectedDevice, onDeviceSele
   };
 
   return (
-    <div 
-      ref={containerRef}
-      className="relative h-full overflow-hidden bg-gradient-to-br from-background via-secondary/20 to-background"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
-      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-    >
-      {/* Legend */}
-      <div className="absolute top-4 left-4 z-20 p-3 bg-card/90 backdrop-blur border border-border rounded-lg">
-        <p className="text-xs font-semibold text-foreground mb-2">Device Types</p>
-        <div className="grid grid-cols-2 gap-2">
-          {(Object.keys(deviceIcons) as DeviceType[]).map(type => {
-            const Icon = deviceIcons[type];
-            return (
-              <div key={type} className="flex items-center gap-1.5">
-                <div 
-                  className="w-5 h-5 rounded flex items-center justify-center"
-                  style={{ backgroundColor: `${deviceColors[type]}20` }}
-                >
-                  <Icon className="w-3 h-3" style={{ color: deviceColors[type] }} />
-                </div>
-                <span className="text-[10px] text-muted-foreground">{deviceLabels[type]}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Controls */}
-      <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
-        <button
-          onClick={() => setZoom(z => Math.min(z * 1.2, 3))}
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
-        >
-          <ZoomIn className="w-5 h-5 text-foreground" />
-        </button>
-        <button
-          onClick={() => setZoom(z => Math.max(z / 1.2, 0.3))}
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
-        >
-          <ZoomOut className="w-5 h-5 text-foreground" />
-        </button>
-        <button
-          onClick={resetView}
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
-        >
-          <Maximize2 className="w-5 h-5 text-foreground" />
-        </button>
-      </div>
-
-      {/* Zoom indicator */}
-      <div className="absolute bottom-4 right-4 z-20 px-3 py-1.5 bg-card/90 backdrop-blur border border-border rounded-lg">
-        <span className="text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
-      </div>
-
-      {/* Canvas */}
+    <div className="h-full flex">
+      {/* Main canvas area */}
       <div 
-        className="absolute inset-0"
-        style={{
-          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-          transformOrigin: '0 0',
-        }}
+        ref={containerRef}
+        className={`relative flex-1 overflow-hidden bg-gradient-to-br from-background via-secondary/20 to-background transition-all duration-300`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       >
-        {/* SVG for connections */}
-        <svg className="absolute inset-0 w-[2000px] h-[1000px] pointer-events-none">
-          <defs>
-            <linearGradient id="healthyGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={statusColors.healthy} stopOpacity="0.6" />
-              <stop offset="100%" stopColor={statusColors.healthy} stopOpacity="0.8" />
-            </linearGradient>
-            <linearGradient id="warningGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={statusColors.warning} stopOpacity="0.6" />
-              <stop offset="100%" stopColor={statusColors.warning} stopOpacity="0.8" />
-            </linearGradient>
-            <linearGradient id="criticalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={statusColors.critical} stopOpacity="0.6" />
-              <stop offset="100%" stopColor={statusColors.critical} stopOpacity="0.8" />
-            </linearGradient>
-            <filter id="connectionGlow">
-              <feGaussianBlur stdDeviation="3" result="blur"/>
-              <feMerge>
-                <feMergeNode in="blur"/>
-                <feMergeNode in="SourceGraphic"/>
-              </feMerge>
-            </filter>
-          </defs>
-
-          {/* Internet cloud connection */}
-          <path
-            d="M 550 30 Q 550 60 550 80"
-            fill="none"
-            stroke="hsl(220 15% 50%)"
-            strokeWidth="2"
-            strokeDasharray="6 4"
-            opacity="0.6"
-          />
-
-          {/* Connection lines */}
-          {connections.map((connection) => {
-            const fromDevice = devices.find(d => d.id === connection.from);
-            const toDevice = devices.find(d => d.id === connection.to);
-            if (!fromDevice?.position || !toDevice?.position) return null;
-
-            const isHighlighted = isConnectionHighlighted(connection);
-            const isHovered = hoveredConnection === connection.id;
-            const color = statusColors[connection.status];
-            
-            const x1 = fromDevice.position.x + 45;
-            const y1 = fromDevice.position.y + 40;
-            const x2 = toDevice.position.x + 45;
-            const y2 = toDevice.position.y + 40;
-            
-            // Create curved path
-            const midX = (x1 + x2) / 2;
-            const midY = (y1 + y2) / 2;
-            const dx = x2 - x1;
-            const dy = y2 - y1;
-            const offset = Math.min(Math.abs(dx), Math.abs(dy)) * 0.2;
-            
-            const path = Math.abs(dy) > Math.abs(dx) 
-              ? `M ${x1} ${y1} Q ${x1} ${midY}, ${midX} ${midY} Q ${x2} ${midY}, ${x2} ${y2}`
-              : `M ${x1} ${y1} Q ${midX} ${y1}, ${midX} ${midY} Q ${midX} ${y2}, ${x2} ${y2}`;
-
-            return (
-              <g key={connection.id}>
-                {/* Connection line */}
-                <path
-                  d={path}
-                  fill="none"
-                  stroke={isHighlighted || isHovered ? color : 'hsl(220 15% 35%)'}
-                  strokeWidth={isHighlighted || isHovered ? 3 : 2}
-                  opacity={(selectedDevice || hoveredDevice) && !isHighlighted ? 0.15 : 0.8}
-                  filter={isHighlighted || isHovered ? 'url(#connectionGlow)' : undefined}
-                  style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-                  onMouseEnter={(e) => {
-                    setHoveredConnection(connection.id);
-                    setTooltipPos({ x: e.clientX, y: e.clientY });
-                  }}
-                  onMouseLeave={() => setHoveredConnection(null)}
-                />
-                
-                {/* Utilization indicator on hover */}
-                {(isHighlighted || isHovered) && (
-                  <g>
-                    <rect
-                      x={midX - 20}
-                      y={midY - 10}
-                      width="40"
-                      height="20"
-                      rx="4"
-                      fill="hsl(var(--card))"
-                      stroke={color}
-                      strokeWidth="1"
-                    />
-                    <text
-                      x={midX}
-                      y={midY + 4}
-                      fill={color}
-                      fontSize="10"
-                      fontWeight="600"
-                      textAnchor="middle"
-                    >
-                      {connection.utilization}%
-                    </text>
-                  </g>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* Internet cloud */}
-        <div 
-          className="absolute flex flex-col items-center gap-1 p-3"
-          style={{ left: 505, top: -30 }}
-        >
-          <div className="flex items-center justify-center w-14 h-14 rounded-full bg-primary/20 border-2 border-primary shadow-lg shadow-primary/20">
-            <Cloud className="w-7 h-7 text-primary" />
+        {/* Legend */}
+        <div className="absolute top-4 left-4 z-20 p-3 bg-card/90 backdrop-blur border border-border rounded-lg">
+          <p className="text-xs font-semibold text-foreground mb-2">Device Types</p>
+          <div className="grid grid-cols-2 gap-2">
+            {(Object.keys(deviceIcons) as DeviceType[]).map(type => {
+              const Icon = deviceIcons[type];
+              return (
+                <div key={type} className="flex items-center gap-1.5">
+                  <div 
+                    className="w-5 h-5 rounded flex items-center justify-center"
+                    style={{ backgroundColor: `${deviceColors[type]}20` }}
+                  >
+                    <Icon className="w-3 h-3" style={{ color: deviceColors[type] }} />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">{deviceLabels[type]}</span>
+                </div>
+              );
+            })}
           </div>
-          <span className="text-xs font-semibold text-foreground">Internet</span>
         </div>
 
-        {/* Device nodes */}
-        {devices.map((device, index) => {
-          if (!device.position) return null;
-          const Icon = deviceIcons[device.deviceType];
-          const isSelected = selectedDevice === device.id;
-          const isHovered = hoveredDevice === device.id;
-          const isRelated = isDeviceRelated(device);
+        {/* Controls */}
+        <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
+          <button
+            onClick={() => setZoom(z => Math.min(z * 1.2, 3))}
+            className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
+          >
+            <ZoomIn className="w-5 h-5 text-foreground" />
+          </button>
+          <button
+            onClick={() => setZoom(z => Math.max(z / 1.2, 0.3))}
+            className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
+          >
+            <ZoomOut className="w-5 h-5 text-foreground" />
+          </button>
+          <button
+            onClick={resetView}
+            className="flex items-center justify-center w-10 h-10 rounded-lg bg-card border border-border hover:bg-secondary transition-colors"
+          >
+            <Maximize2 className="w-5 h-5 text-foreground" />
+          </button>
+        </div>
 
-          return (
-            <motion.div
-              key={device.id}
-              initial={{ opacity: 0, scale: 0 }}
-              animate={{ 
-                opacity: isRelated ? 1 : 0.25, 
-                scale: 1,
-              }}
-              transition={{ delay: index * 0.02, duration: 0.3 }}
-              className={`absolute flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all cursor-pointer ${
-                isSelected || isHovered
-                  ? 'bg-card shadow-xl z-10' 
-                  : 'bg-card/80 hover:bg-card'
-              }`}
-              style={{
-                left: device.position.x,
-                top: device.position.y,
-                borderColor: isSelected || isHovered ? statusColors[device.status] : 'transparent',
-                boxShadow: isSelected || isHovered ? `0 0 25px ${statusColors[device.status]}40` : undefined,
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeviceSelect(isSelected ? null : device.id);
-              }}
-              onMouseEnter={(e) => {
-                setHoveredDevice(device.id);
-                setTooltipPos({ x: e.clientX, y: e.clientY });
-              }}
-              onMouseMove={(e) => {
-                setTooltipPos({ x: e.clientX, y: e.clientY });
-              }}
-              onMouseLeave={() => setHoveredDevice(null)}
-            >
-              <div
-                className="flex items-center justify-center w-12 h-12 rounded-xl"
-                style={{ backgroundColor: `${deviceColors[device.deviceType]}20` }}
-              >
-                <Icon
-                  className="w-6 h-6"
-                  style={{ color: deviceColors[device.deviceType] }}
-                />
-              </div>
-              <span className="text-[11px] font-medium text-foreground whitespace-nowrap max-w-[90px] truncate">
-                {device.name}
-              </span>
-              <span className="text-[9px] text-muted-foreground">{device.ip}</span>
+        {/* Zoom indicator */}
+        <div className="absolute bottom-4 right-4 z-20 px-3 py-1.5 bg-card/90 backdrop-blur border border-border rounded-lg">
+          <span className="text-xs text-muted-foreground">{Math.round(zoom * 100)}%</span>
+        </div>
+
+        {/* Canvas */}
+        <div 
+          className="absolute inset-0"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: '0 0',
+          }}
+        >
+          {/* SVG for connections */}
+          <svg className="absolute inset-0 w-[2000px] h-[1000px] pointer-events-none">
+            <defs>
+              <linearGradient id="healthyGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={statusColors.healthy} stopOpacity="0.6" />
+                <stop offset="100%" stopColor={statusColors.healthy} stopOpacity="0.8" />
+              </linearGradient>
+              <linearGradient id="warningGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={statusColors.warning} stopOpacity="0.6" />
+                <stop offset="100%" stopColor={statusColors.warning} stopOpacity="0.8" />
+              </linearGradient>
+              <linearGradient id="criticalGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={statusColors.critical} stopOpacity="0.6" />
+                <stop offset="100%" stopColor={statusColors.critical} stopOpacity="0.8" />
+              </linearGradient>
+              <filter id="connectionGlow">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            {/* Internet cloud connection */}
+            <path
+              d="M 550 30 Q 550 60 550 80"
+              fill="none"
+              stroke="hsl(220 15% 50%)"
+              strokeWidth="2"
+              strokeDasharray="6 4"
+              opacity="0.6"
+            />
+
+            {/* Connection lines */}
+            {connections.map((connection) => {
+              const fromDevice = devices.find(d => d.id === connection.from);
+              const toDevice = devices.find(d => d.id === connection.to);
+              if (!fromDevice?.position || !toDevice?.position) return null;
+
+              const isHighlighted = isConnectionHighlighted(connection);
+              const isHovered = hoveredConnection === connection.id;
+              const color = statusColors[connection.status];
               
-              {/* Status indicator */}
-              <div
-                className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-card"
-                style={{ backgroundColor: statusColors[device.status] }}
-              />
-            </motion.div>
-          );
-        })}
+              const x1 = fromDevice.position.x + 45;
+              const y1 = fromDevice.position.y + 40;
+              const x2 = toDevice.position.x + 45;
+              const y2 = toDevice.position.y + 40;
+              
+              // Create curved path
+              const midX = (x1 + x2) / 2;
+              const midY = (y1 + y2) / 2;
+              const dx = x2 - x1;
+              const dy = y2 - y1;
+              
+              const path = Math.abs(dy) > Math.abs(dx) 
+                ? `M ${x1} ${y1} Q ${x1} ${midY}, ${midX} ${midY} Q ${x2} ${midY}, ${x2} ${y2}`
+                : `M ${x1} ${y1} Q ${midX} ${y1}, ${midX} ${midY} Q ${midX} ${y2}, ${x2} ${y2}`;
+
+              return (
+                <g key={connection.id}>
+                  {/* Connection line */}
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke={isHighlighted || isHovered ? color : 'hsl(220 15% 35%)'}
+                    strokeWidth={isHighlighted || isHovered ? 3 : 2}
+                    opacity={(selectedDevice || hoveredDevice) && !isHighlighted ? 0.15 : 0.8}
+                    filter={isHighlighted || isHovered ? 'url(#connectionGlow)' : undefined}
+                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                    onMouseEnter={(e) => {
+                      setHoveredConnection(connection.id);
+                      setTooltipPos({ x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseLeave={() => setHoveredConnection(null)}
+                  />
+                  
+                  {/* Utilization indicator on hover */}
+                  {(isHighlighted || isHovered) && (
+                    <g>
+                      <rect
+                        x={midX - 20}
+                        y={midY - 10}
+                        width="40"
+                        height="20"
+                        rx="4"
+                        fill="hsl(var(--card))"
+                        stroke={color}
+                        strokeWidth="1"
+                      />
+                      <text
+                        x={midX}
+                        y={midY + 4}
+                        fill={color}
+                        fontSize="10"
+                        fontWeight="600"
+                        textAnchor="middle"
+                      >
+                        {connection.utilization}%
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* Internet cloud */}
+          <div 
+            className="absolute flex flex-col items-center gap-1 p-3"
+            style={{ left: 505, top: -30 }}
+          >
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-primary/20 border-2 border-primary shadow-lg shadow-primary/20">
+              <Cloud className="w-7 h-7 text-primary" />
+            </div>
+            <span className="text-xs font-semibold text-foreground">Internet</span>
+          </div>
+
+          {/* Device nodes */}
+          {devices.map((device, index) => {
+            if (!device.position) return null;
+            const Icon = deviceIcons[device.deviceType];
+            const isSelected = selectedDevice === device.id;
+            const isHovered = hoveredDevice === device.id;
+            const isRelated = isDeviceRelated(device);
+
+            return (
+              <motion.div
+                key={device.id}
+                initial={{ opacity: 0, scale: 0 }}
+                animate={{ 
+                  opacity: isRelated ? 1 : 0.25, 
+                  scale: 1,
+                }}
+                transition={{ delay: index * 0.02, duration: 0.3 }}
+                className={`absolute flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all cursor-pointer ${
+                  isSelected || isHovered
+                    ? 'bg-card shadow-xl z-10' 
+                    : 'bg-card/80 hover:bg-card'
+                }`}
+                style={{
+                  left: device.position.x,
+                  top: device.position.y,
+                  borderColor: isSelected || isHovered ? statusColors[device.status] : 'transparent',
+                  boxShadow: isSelected || isHovered ? `0 0 25px ${statusColors[device.status]}40` : undefined,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeviceSelect(isSelected ? null : device.id);
+                }}
+                onMouseEnter={(e) => {
+                  setHoveredDevice(device.id);
+                  setTooltipPos({ x: e.clientX, y: e.clientY });
+                }}
+                onMouseMove={(e) => {
+                  setTooltipPos({ x: e.clientX, y: e.clientY });
+                }}
+                onMouseLeave={() => setHoveredDevice(null)}
+              >
+                <div
+                  className="flex items-center justify-center w-12 h-12 rounded-xl"
+                  style={{ backgroundColor: `${deviceColors[device.deviceType]}20` }}
+                >
+                  <Icon
+                    className="w-6 h-6"
+                    style={{ color: deviceColors[device.deviceType] }}
+                  />
+                </div>
+                <span className="text-[11px] font-medium text-foreground whitespace-nowrap max-w-[90px] truncate">
+                  {device.name}
+                </span>
+                <span className="text-[9px] text-muted-foreground">{device.ip}</span>
+                
+                {/* Status indicator */}
+                <div
+                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-card"
+                  style={{ backgroundColor: statusColors[device.status] }}
+                />
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* Device Tooltip */}
+        <AnimatePresence>
+          {hoveredDevice && !selectedDevice && (
+            <DeviceTooltip 
+              device={devices.find(d => d.id === hoveredDevice)!}
+              connections={getRelatedConnections(hoveredDevice)}
+              position={tooltipPos}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Connection Tooltip */}
+        <AnimatePresence>
+          {hoveredConnection && (
+            <ConnectionTooltip 
+              connection={connections.find(c => c.id === hoveredConnection)!}
+              devices={devices}
+              position={tooltipPos}
+            />
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* Device Tooltip */}
-      <AnimatePresence>
-        {hoveredDevice && !selectedDevice && (
-          <DeviceTooltip 
-            device={devices.find(d => d.id === hoveredDevice)!}
-            connections={getRelatedConnections(hoveredDevice)}
-            position={tooltipPos}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Connection Tooltip */}
-      <AnimatePresence>
-        {hoveredConnection && (
-          <ConnectionTooltip 
-            connection={connections.find(c => c.id === hoveredConnection)!}
-            devices={devices}
-            position={tooltipPos}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Selected device details panel */}
+      {/* Right Side Panel - Device Details */}
       <AnimatePresence>
         {selectedDevice && (
           <DeviceDetailsPanel 
@@ -475,7 +543,7 @@ const DeviceTooltip = ({ device, connections, position }: DeviceTooltipProps) =>
   const avgUtilization = connections.length > 0 
     ? Math.round(connections.reduce((acc, c) => acc + (c.utilization || 0), 0) / connections.length)
     : 0;
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -483,40 +551,32 @@ const DeviceTooltip = ({ device, connections, position }: DeviceTooltipProps) =>
       exit={{ opacity: 0, scale: 0.95 }}
       className="fixed z-50 p-4 bg-card/95 backdrop-blur border border-border rounded-lg shadow-xl min-w-[220px]"
       style={{
-        left: position.x + 15,
-        top: position.y + 15,
+        left: Math.min(position.x + 15, window.innerWidth - 250),
+        top: Math.min(position.y + 15, window.innerHeight - 220),
         pointerEvents: 'none',
       }}
     >
       <div className="flex items-center gap-3 mb-3 pb-3 border-b border-border">
-        <div 
-          className="w-10 h-10 rounded-lg flex items-center justify-center"
+        <div
+          className="flex items-center justify-center w-10 h-10 rounded-xl"
           style={{ backgroundColor: `${deviceColors[device.deviceType]}20` }}
         >
           <Icon className="w-5 h-5" style={{ color: deviceColors[device.deviceType] }} />
         </div>
-        <div className="flex-1">
-          <p className="font-semibold text-foreground text-sm">{device.name}</p>
-          <p className="text-xs text-muted-foreground">{deviceLabels[device.deviceType]}</p>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-foreground text-sm truncate">{device.name}</p>
+          <p className="text-xs text-muted-foreground">{device.vendor} {device.model}</p>
         </div>
-        <div 
+        <div
           className="w-3 h-3 rounded-full"
           style={{ backgroundColor: statusColors[device.status] }}
         />
       </div>
-      
-      <div className="space-y-2 text-xs">
+
+      <div className="space-y-1.5 text-xs">
         <div className="flex justify-between">
           <span className="text-muted-foreground">IP Address</span>
           <span className="font-medium text-foreground">{device.ip}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Vendor</span>
-          <span className="font-medium text-foreground">{device.vendor}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Model</span>
-          <span className="font-medium text-foreground">{device.model}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Connections</span>
@@ -524,8 +584,20 @@ const DeviceTooltip = ({ device, connections, position }: DeviceTooltipProps) =>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Avg Utilization</span>
-          <span className="font-medium text-foreground">{avgUtilization}%</span>
+          <span className="font-medium" style={{ color: avgUtilization > 70 ? statusColors.warning : statusColors.healthy }}>
+            {avgUtilization}%
+          </span>
         </div>
+        <div className="flex justify-between items-center">
+          <span className="text-muted-foreground">Status</span>
+          <span className="font-medium capitalize" style={{ color: statusColors[device.status] }}>
+            {device.status}
+          </span>
+        </div>
+      </div>
+      
+      <div className="mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
+        Click for detailed metrics
       </div>
     </motion.div>
   );
@@ -541,7 +613,7 @@ interface ConnectionTooltipProps {
 const ConnectionTooltip = ({ connection, devices, position }: ConnectionTooltipProps) => {
   const fromDevice = devices.find(d => d.id === connection.from);
   const toDevice = devices.find(d => d.id === connection.to);
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -549,8 +621,8 @@ const ConnectionTooltip = ({ connection, devices, position }: ConnectionTooltipP
       exit={{ opacity: 0, scale: 0.95 }}
       className="fixed z-50 p-3 bg-card/95 backdrop-blur border border-border rounded-lg shadow-xl min-w-[180px]"
       style={{
-        left: position.x + 15,
-        top: position.y + 15,
+        left: Math.min(position.x + 15, window.innerWidth - 210),
+        top: Math.min(position.y + 15, window.innerHeight - 180),
         pointerEvents: 'none',
       }}
     >
@@ -593,7 +665,7 @@ const ConnectionTooltip = ({ connection, devices, position }: ConnectionTooltipP
   );
 };
 
-// Device Details Panel
+// Device Details Panel (Right Side)
 interface DeviceDetailsPanelProps {
   device: NetworkDevice;
   connections: Connection[];
@@ -603,61 +675,164 @@ interface DeviceDetailsPanelProps {
 
 const DeviceDetailsPanel = ({ device, connections, devices, onClose }: DeviceDetailsPanelProps) => {
   const Icon = deviceIcons[device.deviceType];
+  const metrics = getDeviceMetrics(device);
   const avgUtilization = connections.length > 0 
     ? Math.round(connections.reduce((acc, c) => acc + (c.utilization || 0), 0) / connections.length)
     : 0;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      className="absolute bottom-4 left-4 right-4 p-4 bg-card/95 backdrop-blur border border-border rounded-xl shadow-xl"
+      initial={{ opacity: 0, x: 320 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 320 }}
+      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+      className="w-80 h-full bg-card border-l border-border overflow-y-auto"
     >
-      <div className="flex items-start gap-4">
+      {/* Header */}
+      <div className="sticky top-0 z-10 flex items-center gap-3 p-4 bg-card border-b border-border">
         <div
-          className="flex items-center justify-center w-14 h-14 rounded-xl"
+          className="flex items-center justify-center w-12 h-12 rounded-xl"
           style={{ backgroundColor: `${deviceColors[device.deviceType]}20` }}
         >
-          <Icon className="w-7 h-7" style={{ color: deviceColors[device.deviceType] }} />
+          <Icon className="w-6 h-6" style={{ color: deviceColors[device.deviceType] }} />
         </div>
-        
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h4 className="text-lg font-semibold text-foreground">{device.name}</h4>
+            <h3 className="text-base font-semibold text-foreground truncate">{device.name}</h3>
             <div
-              className="w-3 h-3 rounded-full"
+              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
               style={{ backgroundColor: statusColors[device.status] }}
             />
           </div>
-          <p className="text-sm text-muted-foreground">
-            {device.vendor} {device.model} • {device.ip}
+          <p className="text-xs text-muted-foreground">
+            {device.vendor} {device.model}
           </p>
         </div>
-
-        <div className="flex items-center gap-6">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-foreground">{connections.length}</p>
-            <p className="text-xs text-muted-foreground">Connections</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-foreground">{avgUtilization}%</p>
-            <p className="text-xs text-muted-foreground">Avg Utilization</p>
-          </div>
-        </div>
-
         <button
           onClick={onClose}
-          className="px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-secondary transition-colors"
         >
-          Close
+          <X className="w-4 h-4 text-muted-foreground" />
         </button>
       </div>
 
-      {/* Connected devices */}
-      <div className="mt-4 pt-4 border-t border-border">
-        <p className="text-xs font-semibold text-muted-foreground mb-2">Connected Devices</p>
-        <div className="flex flex-wrap gap-2">
+      {/* Basic Info */}
+      <div className="p-4 border-b border-border">
+        <h4 className="text-xs font-semibold text-muted-foreground mb-3">DEVICE INFO</h4>
+        <div className="space-y-2">
+          <InfoRow label="IP Address" value={device.ip || 'N/A'} />
+          <InfoRow label="Type" value={deviceLabels[device.deviceType]} />
+          <InfoRow label="Status" value={device.status} valueColor={statusColors[device.status]} />
+          <InfoRow label="Uptime" value={metrics.uptime} />
+          <InfoRow label="Last Seen" value={metrics.lastSeen} />
+        </div>
+      </div>
+
+      {/* Critical Metrics */}
+      <div className="p-4 border-b border-border">
+        <h4 className="text-xs font-semibold text-muted-foreground mb-3">CRITICAL METRICS</h4>
+        <div className="grid grid-cols-2 gap-3">
+          {'cpu' in metrics && (
+            <MetricCard 
+              icon={Cpu} 
+              label="CPU" 
+              value={metrics.cpu as string} 
+              status={parseInt(metrics.cpu as string) > 80 ? 'critical' : parseInt(metrics.cpu as string) > 60 ? 'warning' : 'healthy'}
+            />
+          )}
+          {'memory' in metrics && (
+            <MetricCard 
+              icon={HardDrive} 
+              label="Memory" 
+              value={metrics.memory as string}
+              status={parseInt(metrics.memory as string) > 80 ? 'critical' : parseInt(metrics.memory as string) > 60 ? 'warning' : 'healthy'}
+            />
+          )}
+          {'temperature' in metrics && (
+            <MetricCard 
+              icon={Thermometer} 
+              label="Temp" 
+              value={metrics.temperature as string}
+              status={parseInt(metrics.temperature as string) > 50 ? 'warning' : 'healthy'}
+            />
+          )}
+          {'disk' in metrics && (
+            <MetricCard 
+              icon={HardDrive} 
+              label="Disk" 
+              value={metrics.disk as string}
+              status={parseInt(metrics.disk as string) > 80 ? 'critical' : 'healthy'}
+            />
+          )}
+          {'throughput' in metrics && (
+            <MetricCard 
+              icon={Activity} 
+              label="Throughput" 
+              value={metrics.throughput as string}
+              status="healthy"
+            />
+          )}
+          {'clients' in metrics && (
+            <MetricCard 
+              icon={Network} 
+              label="Clients" 
+              value={String(metrics.clients)}
+              status="healthy"
+            />
+          )}
+        </div>
+
+        {/* Additional metrics */}
+        <div className="mt-3 space-y-2">
+          {'packets' in metrics && <InfoRow label="Packets" value={metrics.packets as string} />}
+          {'errors' in metrics && (
+            <InfoRow 
+              label="Errors" 
+              value={String(metrics.errors)} 
+              valueColor={(metrics.errors as number) > 0 ? statusColors.warning : undefined}
+            />
+          )}
+          {'interfaces' in metrics && <InfoRow label="Interfaces" value={String(metrics.interfaces)} />}
+          {'ports' in metrics && <InfoRow label="Active Ports" value={metrics.ports as string} />}
+          {'vlanCount' in metrics && <InfoRow label="VLANs" value={String(metrics.vlanCount)} />}
+          {'activeSessions' in metrics && <InfoRow label="Active Sessions" value={metrics.activeSessions as string} />}
+          {'blockedThreats' in metrics && (
+            <InfoRow 
+              label="Blocked Threats" 
+              value={String(metrics.blockedThreats)} 
+              icon={<AlertTriangle className="w-3 h-3 text-status-warning" />}
+            />
+          )}
+          {'processes' in metrics && <InfoRow label="Processes" value={String(metrics.processes)} />}
+          {'networkIO' in metrics && <InfoRow label="Network I/O" value={metrics.networkIO as string} />}
+          {'signalStrength' in metrics && <InfoRow label="Signal" value={metrics.signalStrength as string} />}
+          {'channel' in metrics && <InfoRow label="Channel" value={String(metrics.channel)} />}
+        </div>
+      </div>
+
+      {/* Network Summary */}
+      <div className="p-4 border-b border-border">
+        <h4 className="text-xs font-semibold text-muted-foreground mb-3">NETWORK SUMMARY</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-3 bg-secondary/30 rounded-lg text-center">
+            <p className="text-2xl font-bold text-foreground">{connections.length}</p>
+            <p className="text-xs text-muted-foreground">Connections</p>
+          </div>
+          <div className="p-3 bg-secondary/30 rounded-lg text-center">
+            <p className="text-2xl font-bold" style={{ color: avgUtilization > 70 ? statusColors.warning : statusColors.healthy }}>
+              {avgUtilization}%
+            </p>
+            <p className="text-xs text-muted-foreground">Avg Utilization</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Connected Devices */}
+      <div className="p-4">
+        <h4 className="text-xs font-semibold text-muted-foreground mb-3">
+          CONNECTED DEVICES ({connections.length})
+        </h4>
+        <div className="space-y-2">
           {connections.map(conn => {
             const connectedId = conn.from === device.id ? conn.to : conn.from;
             const connectedDevice = devices.find(d => d.id === connectedId);
@@ -667,16 +842,30 @@ const DeviceDetailsPanel = ({ device, connections, devices, onClose }: DeviceDet
             return (
               <div 
                 key={conn.id}
-                className="flex items-center gap-2 px-2 py-1 bg-secondary/50 rounded-lg"
+                className="flex items-center gap-3 p-2 bg-secondary/20 rounded-lg hover:bg-secondary/40 transition-colors"
               >
-                <ConnIcon className="w-3 h-3" style={{ color: deviceColors[connectedDevice.deviceType] }} />
-                <span className="text-xs text-foreground">{connectedDevice.name}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ 
-                  backgroundColor: `${statusColors[conn.status]}20`,
-                  color: statusColors[conn.status]
-                }}>
-                  {conn.utilization}%
-                </span>
+                <div
+                  className="flex items-center justify-center w-8 h-8 rounded-lg"
+                  style={{ backgroundColor: `${deviceColors[connectedDevice.deviceType]}20` }}
+                >
+                  <ConnIcon className="w-4 h-4" style={{ color: deviceColors[connectedDevice.deviceType] }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{connectedDevice.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{connectedDevice.ip}</p>
+                </div>
+                <div className="flex flex-col items-end gap-0.5">
+                  <span 
+                    className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                    style={{ 
+                      backgroundColor: `${statusColors[conn.status]}20`,
+                      color: statusColors[conn.status]
+                    }}
+                  >
+                    {conn.utilization}%
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">{conn.bandwidth} Mbps</span>
+                </div>
               </div>
             );
           })}
@@ -685,3 +874,24 @@ const DeviceDetailsPanel = ({ device, connections, devices, onClose }: DeviceDet
     </motion.div>
   );
 };
+
+// Helper components
+const InfoRow = ({ label, value, valueColor, icon }: { label: string; value: string; valueColor?: string; icon?: React.ReactNode }) => (
+  <div className="flex justify-between items-center">
+    <span className="text-xs text-muted-foreground">{label}</span>
+    <span className="text-xs font-medium flex items-center gap-1" style={{ color: valueColor || 'hsl(var(--foreground))' }}>
+      {icon}
+      {value}
+    </span>
+  </div>
+);
+
+const MetricCard = ({ icon: Icon, label, value, status }: { icon: typeof Cpu; label: string; value: string; status: StatusType }) => (
+  <div className="p-2.5 bg-secondary/30 rounded-lg">
+    <div className="flex items-center gap-1.5 mb-1">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+    </div>
+    <p className="text-lg font-bold" style={{ color: statusColors[status] }}>{value}</p>
+  </div>
+);
